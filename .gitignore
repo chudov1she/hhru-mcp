@@ -1,0 +1,15 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Секреты и токены — НИКОГДА в git
+.env
+tokens.json
+
+# Логи
+*.log
+
+# Выгрузки данных
+negotiations.json
+negotiations_full.json
