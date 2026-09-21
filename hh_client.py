@@ -212,7 +212,10 @@ def get_messages(negotiation_id: str) -> List[Dict[str, Any]]:
 def get_negotiation(negotiation_id: str) -> Dict[str, Any]:
     r = _request_with_retries("GET", f"https://api.hh.ru/negotiations/{negotiation_id}")
     if r.status_code == 404:
-        # у тем нет прямого GET, соберём из сообщений и действий
+        # прямого GET отклика нет — ищем в списках по вакансиям (там полная карточка с actions)
+        found = _find_negotiation(negotiation_id)
+        if found:
+            return found[0]
         msgs = get_messages(negotiation_id)
         return {"id": negotiation_id, "messages": msgs}
     r.raise_for_status()
@@ -265,28 +268,47 @@ def send_negotiation_action(
 def get_allowed_actions(negotiation_id: str) -> List[Dict[str, Any]]:
     """
     Возвращает список допустимых действий (этапов) для отклика без их выполнения.
+    Ищет отклик по всем вакансиям работодателя (автопоиск, без переменных окружения).
     """
-    vac = os.getenv("HH_VACANCY_ID")
-    for v in _active_vacancy_ids():
-        items = get_negotiations(v)
-        for n in items:
-            if str(n.get("id")) == str(negotiation_id):
-                return [
-                    {
-                        "id": a.get("id"),
-                        "name": a.get("name"),
-                        "enabled": a.get("enabled"),
-                        "arguments": [ar.get("id") for ar in a.get("arguments", [])],
-                    }
-                    for a in n.get("actions", [])
-                ]
+    for n in _find_negotiation(negotiation_id):
+        return [
+            {
+                "id": a.get("id"),
+                "name": a.get("name"),
+                "enabled": a.get("enabled"),
+                "arguments": [ar.get("id") for ar in a.get("arguments", [])],
+            }
+            for a in n.get("actions", [])
+        ]
     return []
 
 
-def _active_vacancy_ids() -> List[str]:
-    ids = os.getenv("HH_VACANCY_IDS", "")
-    if ids:
-        return [i.strip() for i in ids.split(",") if i.strip()]
+def _find_negotiation(negotiation_id: str) -> List[Dict[str, Any]]:
+    """
+    Ищет отклик по id во всех вакансиях работодателя. Возвращает список из 0/1 элементов
+    (полный item с actions). Перебор идёт по страницам, лимит ~10 вакансий на цикл.
+    """
+    me = get_me()
+    emp_id = me.get("employer", {}).get("id")
+    vacancies = get_employer_vacancies(str(emp_id))
+    for v in vacancies:
+        vac_id = str(v.get("id"))
+        page = 0
+        while page < 10:  # предохранитель: максимум 10 страниц (500 откликов) на вакансию
+            r = _request_with_retries(
+                "GET",
+                "https://api.hh.ru/negotiations/response",
+                params={"vacancy_id": vac_id, "per_page": 50, "page": page},
+            )
+            if r.status_code != 200:
+                break
+            d = r.json()
+            for n in d.get("items", []):
+                if str(n.get("id")) == str(negotiation_id):
+                    return [n]
+            page += 1
+            if page >= d.get("pages", 1):
+                break
     return []
 
 
