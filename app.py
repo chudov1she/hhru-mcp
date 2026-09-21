@@ -25,7 +25,11 @@ PUBLIC_PATHS = ("/", "/auth", "/callback")
 async def require_api_key(request: Request, call_next):
     if request.url.path in PUBLIC_PATHS:
         return await call_next(request)
-    if not hh_client.check_api_key(request.headers.get("Authorization")):
+    # Ключ принимаем из заголовка Authorization или из query (?api_key=...) —
+    # некоторые клиенты (Claude Connectors) не умеют слать заголовки
+    auth_header = request.headers.get("Authorization")
+    query_key = request.query_params.get("api_key")
+    if not hh_client.check_api_key(auth_header) and not hh_client.check_api_key_raw(query_key):
         return JSONResponse(status_code=401, content={"detail": "Unauthorized: invalid or missing API key"})
     return await call_next(request)
 

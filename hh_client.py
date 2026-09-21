@@ -34,6 +34,14 @@ def check_api_key(authorization: Optional[str]) -> bool:
     return value.strip() == expected
 
 
+def check_api_key_raw(key: Optional[str]) -> bool:
+    """Проверяет ключ напрямую (например, из query-параметра ?api_key=...)."""
+    expected = get_api_key()
+    if not expected or not key:
+        return False
+    return key.strip() == expected
+
+
 def _load_tokens() -> Dict[str, Any]:
     with open(TOKENS_FILE, encoding="utf-8") as f:
         return json.load(f)
