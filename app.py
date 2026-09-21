@@ -1,9 +1,10 @@
+import contextlib
 import os
 
 import requests
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import RedirectResponse
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
 import hh_client
@@ -15,6 +16,18 @@ app = FastAPI(title="HH Connector API", version="1.0.0")
 CLIENT_ID = os.getenv("HH_CLIENT_ID")
 CLIENT_SECRET = os.getenv("HH_CLIENT_SECRET")
 REDIRECT_URI = os.getenv("HH_REDIRECT_URI", "http://localhost:8000/callback")
+
+# Пути, доступные без ключа: OAuth flow и health-check
+PUBLIC_PATHS = ("/", "/auth", "/callback")
+
+
+@app.middleware("http")
+async def require_api_key(request: Request, call_next):
+    if request.url.path in PUBLIC_PATHS:
+        return await call_next(request)
+    if not hh_client.check_api_key(request.headers.get("Authorization")):
+        return JSONResponse(status_code=401, content={"detail": "Unauthorized: invalid or missing API key"})
+    return await call_next(request)
 
 
 class SendMessageRequest(BaseModel):
@@ -191,3 +204,55 @@ def send_message(req: SendMessageRequest):
         )
     except requests.exceptions.HTTPError as e:
         raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+
+
+# ---------- MCP over streamable HTTP (/mcp) ----------
+
+from mcp.server import Server as MCPLowlevelServer
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+
+mcp_server = MCPLowlevelServer("hh-connector")
+
+
+@mcp_server.list_tools()
+async def mcp_list_tools(*_) -> list:
+    import mcp_common
+
+    return mcp_common.TOOLS
+
+
+@mcp_server.call_tool()
+async def mcp_call_tool(name: str, arguments: dict | None) -> list:
+    import mcp_common
+
+    return await mcp_common.call_tool(name, arguments)
+
+
+_session_manager = StreamableHTTPSessionManager(
+    app=mcp_server,
+    stateless=True,
+    json_response=True,
+)
+
+
+@app.post("/mcp")
+@app.get("/mcp")
+async def mcp_http(request: Request):
+    # auth уже проверен middleware выше (PUBLIC_PATHS не включает /mcp)
+    await _session_manager.handle_request(request.scope, request.receive, request._send)
+
+
+@app.on_event("startup")
+async def mcp_startup():
+    global _mcp_session_cm
+    _mcp_session_cm = _session_manager.run()
+    await _mcp_session_cm.__aenter__()
+
+
+@app.on_event("shutdown")
+async def mcp_shutdown():
+    with contextlib.suppress(Exception):
+        await _mcp_session_cm.__aexit__(None, None, None)
+
+
+_mcp_session_cm = None

@@ -16,6 +16,24 @@ UA = os.getenv("HH_USER_AGENT", "hh-mcp-connector/1.0 (claude-hhru project)")
 _lock = threading.Lock()
 
 
+def get_api_key() -> Optional[str]:
+    return os.getenv("MCP_API_KEY")
+
+
+def check_api_key(authorization: Optional[str]) -> bool:
+    """
+    Проверяет заголовок Authorization: Bearer <MCP_API_KEY>.
+    Если MCP_API_KEY не задан в окружении — доступ запрещён всегда.
+    """
+    expected = get_api_key()
+    if not expected or not authorization:
+        return False
+    scheme, _, value = authorization.partition(" ")
+    if scheme.lower() != "bearer":
+        return False
+    return value.strip() == expected
+
+
 def _load_tokens() -> Dict[str, Any]:
     with open(TOKENS_FILE, encoding="utf-8") as f:
         return json.load(f)

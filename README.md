@@ -25,6 +25,7 @@ MCP-сервер и REST API для интеграции с [hh.ru](https://hh.r
 | Файл | Назначение |
 |---|---|
 | `mcp_server.py` | MCP-сервер (stdio) для подключения к AI-клиентам |
+| `mcp_common.py` | Описание MCP-tools и логика вызовов (общая для stdio и HTTP) |
 | `app.py` | REST API (FastAPI): те же возможности по HTTP |
 | `hh_client.py` | Клиент hh.ru: токены, авто-refresh, вызовы API |
 | `test_mcp.py` | Тест MCP-сервера (initialize → tools/list → вызовы read-only tools) |
@@ -127,6 +128,34 @@ claude mcp add hh-connector -- "/path/to/hhru-mcp/.venv/bin/python" -X utf8 /pat
 ### Другие клиенты (Hermes, Cursor, ...)
 
 Любой MCP-клиент со stdio-транспортом: команда — python с путём к `mcp_server.py`.
+
+## Транспорт и авторизация
+
+Сервер поддерживает два транспорта MCP:
+
+- **stdio** (`mcp_server.py`) — для Claude Desktop/Code и локальных клиентов. Ключ не нужен.
+- **streamable HTTP** — `POST/GET /mcp` на порту 8000 (в составе `app.py`). Для веб-клиентов и Connectors.
+
+**Авторизация (HTTP/REST):** все запросы, кроме `/`, `/auth`, `/callback`, требуют заголовок:
+
+```
+Authorization: Bearer <MCP_API_KEY>
+```
+
+Ключ задаётся в `.env` (`MCP_API_KEY`). Без ключа или с неверным — `401`.
+
+Конфиг для HTTP-клиентов (Hermes, Connectors, веб-агенты):
+
+```json
+{
+  "mcpServers": {
+    "hh-connector": {
+      "url": "https://ваш-домен/mcp",
+      "headers": { "Authorization": "Bearer <MCP_API_KEY>" }
+    }
+  }
+}
+```
 
 ## REST API
 
